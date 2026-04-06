@@ -1,0 +1,14 @@
+{
+  "name": "@likhang/types",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "echo Build shared types",
+    "lint": "echo Add types lint",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "echo No tests yet"
+  }
+}
