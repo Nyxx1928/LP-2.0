@@ -230,9 +230,10 @@ jobs:
           trivy fs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --ignorefile .trivyignore --format table --output trivy-report.txt .
 
       - name: Install Cosign
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/sigstore/cosign/main/install.sh | sh -s -- -b /usr/local/bin
-          cosign version
+        uses: sigstore/cosign-installer@v3.8.1
+
+      - name: Verify Cosign install
+        run: cosign version
 
       - name: Cosign authenticator (keyless sign and verify)
         if: github.event_name == 'push'
