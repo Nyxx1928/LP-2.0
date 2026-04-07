@@ -226,8 +226,8 @@ jobs:
 
       - name: Trivy vulnerability scan
         run: |
-          trivy fs --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 .
-          trivy fs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --format table --output trivy-report.txt .
+          trivy fs --scanners vuln --severity CRITICAL --ignore-unfixed --ignorefile .trivyignore --exit-code 1 .
+          trivy fs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --ignorefile .trivyignore --format table --output trivy-report.txt .
 
       - name: Install Cosign
         run: |
