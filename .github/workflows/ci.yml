@@ -63,7 +63,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run backend unit tests
-        run: pnpm --filter @likhang/backend test:unit -- --passWithNoTests
+        run: pnpm --filter @likhang/backend test:unit --passWithNoTests
 
   phase3_integration_testing:
     name: Phase 3 - Integration testing
