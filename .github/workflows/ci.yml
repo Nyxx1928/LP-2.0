@@ -13,7 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
+  phase1_lint_validate:
+    name: Phase 1 - Lint and validate
     runs-on: ubuntu-latest
     env:
       TURBO_TELEMETRY_DISABLED: "1"
@@ -39,5 +40,268 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Build
-        run: pnpm build
+  phase2_unit_testing:
+    name: Phase 2 - Unit testing
+    runs-on: ubuntu-latest
+    needs: phase1_lint_validate
+    env:
+      TURBO_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run backend unit tests
+        run: pnpm --filter @likhang/backend test:unit --passWithNoTests
+
+  phase3_integration_testing:
+    name: Phase 3 - Integration testing
+    runs-on: ubuntu-latest
+    needs: phase2_unit_testing
+    env:
+      TURBO_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/likhang_pinas
+      REDIS_URL: redis://localhost:6379
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: likhang_pinas
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run backend integration tests
+        run: pnpm --filter @likhang/backend test:integration:http
+
+  phase4_e2e_playwright:
+    name: Phase 4 - E2E (Playwright)
+    runs-on: ubuntu-latest
+    needs: phase3_integration_testing
+    env:
+      TURBO_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Playwright setup
+        shell: bash
+        run: |
+          test -f apps/storefront/playwright.config.ts
+          test -d apps/storefront/tests/e2e
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @likhang/storefront exec playwright install --with-deps
+
+      - name: Run Playwright tests
+        run: pnpm --filter @likhang/storefront test:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/storefront/playwright-report
+            apps/storefront/test-results
+          if-no-files-found: ignore
+
+  phase5_test_build_docker:
+    name: Phase 5 - Test and build Docker
+    runs-on: ubuntu-latest
+    needs: phase4_e2e_playwright
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate Docker configuration files
+        shell: bash
+        run: |
+          test -f infra/docker/docker-compose.dev.yml
+          test -f apps/backend/Dockerfile
+          test -f apps/storefront/Dockerfile
+
+      - name: Validate Docker Compose
+        run: docker compose -f infra/docker/docker-compose.dev.yml config
+
+      - name: Start Docker services
+        run: docker compose -f infra/docker/docker-compose.dev.yml up -d
+
+      - name: Verify Docker services are running
+        run: docker compose -f infra/docker/docker-compose.dev.yml ps
+
+      - name: Build backend image
+        run: docker build -f apps/backend/Dockerfile -t likhang/backend:ci apps/backend
+
+      - name: Build storefront image
+        run: docker build -f apps/storefront/Dockerfile -t likhang/storefront:ci apps/storefront
+
+      - name: Stop Docker services
+        if: always()
+        run: docker compose -f infra/docker/docker-compose.dev.yml down -v
+
+  phase6_security_scan:
+    name: Phase 6 - Security scan
+    runs-on: ubuntu-latest
+    needs: phase5_test_build_docker
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          syft version
+
+      - name: Generate SBOM (dependencies)
+        run: syft dir:. -o spdx-json=sbom-dependencies.spdx.json
+
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy --version
+
+      - name: Trivy vulnerability scan
+        run: |
+          trivy fs --scanners vuln --severity CRITICAL --ignore-unfixed --ignorefile .trivyignore --exit-code 1 .
+          trivy fs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --ignorefile .trivyignore --format table --output trivy-report.txt .
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.8.1
+
+      - name: Verify Cosign install
+        run: cosign version
+
+      - name: Cosign authenticator (keyless sign and verify)
+        if: github.event_name == 'push'
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign sign-blob --yes --output-signature sbom.sig --output-certificate sbom.pem sbom-dependencies.spdx.json
+          cosign verify-blob \
+            --certificate sbom.pem \
+            --signature sbom.sig \
+            --certificate-identity-regexp "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/ci.yml@.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            sbom-dependencies.spdx.json
+
+      - name: Skip Cosign keyless signing on PR
+        if: github.event_name != 'push'
+        run: echo "Cosign keyless sign/verify runs on push events only."
+
+      - name: Upload security artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-artifacts
+          path: |
+            sbom-dependencies.spdx.json
+            trivy-report.txt
+            sbom.sig
+            sbom.pem
+          if-no-files-found: ignore
+
+  phase7_ci_summary:
+    name: Phase 7 - CI summary
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - phase1_lint_validate
+      - phase2_unit_testing
+      - phase3_integration_testing
+      - phase4_e2e_playwright
+      - phase5_test_build_docker
+      - phase6_security_scan
+    steps:
+      - name: Generate summary
+        env:
+          PHASE1: ${{ needs.phase1_lint_validate.result }}
+          PHASE2: ${{ needs.phase2_unit_testing.result }}
+          PHASE3: ${{ needs.phase3_integration_testing.result }}
+          PHASE4: ${{ needs.phase4_e2e_playwright.result }}
+          PHASE5: ${{ needs.phase5_test_build_docker.result }}
+          PHASE6: ${{ needs.phase6_security_scan.result }}
+        shell: bash
+        run: |
+          {
+            echo "## CI Pipeline Summary"
+            echo
+            echo "| Phase | Result |"
+            echo "|---|---|"
+            echo "| Phase 1 - Lint and validate | ${PHASE1} |"
+            echo "| Phase 2 - Unit testing | ${PHASE2} |"
+            echo "| Phase 3 - Integration testing | ${PHASE3} |"
+            echo "| Phase 4 - E2E (Playwright) | ${PHASE4} |"
+            echo "| Phase 5 - Test and build Docker | ${PHASE5} |"
+            echo "| Phase 6 - Security scan | ${PHASE6} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for status in "$PHASE1" "$PHASE2" "$PHASE3" "$PHASE4" "$PHASE5" "$PHASE6"; do
+            if [ "$status" != "success" ]; then
+              echo "One or more phases failed."
+              exit 1
+            fi
+          done

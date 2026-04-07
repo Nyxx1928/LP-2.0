@@ -1,0 +1,3 @@
+# Temporary allowlist: Medusa 2.13.5 currently resolves @mikro-orm/core 6.4.16.
+# Remove this ignore after upgrading Medusa/transitives to a non-vulnerable MikroORM version.
+CVE-2026-34220
