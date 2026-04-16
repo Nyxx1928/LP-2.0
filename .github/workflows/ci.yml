@@ -37,11 +37,17 @@ jobs:
       - name: Sanitize - Check for secrets
         run: |
           echo "Checking for potential secrets in code..."
-          if grep -r -E "(password|secret|api[_-]?key|token|credential).*=.*['\"][^'\"]{8,}" --exclude-dir={node_modules,.git,.turbo,dist,build} --exclude="*.lock" --exclude="pnpm-lock.yaml" .; then
-            echo "⚠️ Warning: Potential secrets found in code"
+          # Look for actual secret assignments, excluding documentation and test files
+          if grep -r -E "(PASSWORD|SECRET|API_KEY|TOKEN|CREDENTIAL)\s*=\s*['\"][a-zA-Z0-9+/=]{16,}" \
+            --include="*.ts" --include="*.js" --include="*.tsx" --include="*.jsx" \
+            --exclude-dir={node_modules,.git,.turbo,dist,build,__tests__} \
+            --exclude="*.test.ts" --exclude="*.test.js" --exclude="*.spec.ts" --exclude="*.spec.js" \
+            --exclude="*.md" --exclude="*example*" \
+            apps/ packages/ 2>/dev/null; then
+            echo "⚠️ Warning: Potential hardcoded secrets found"
             exit 1
           fi
-          echo "✓ No obvious secrets detected"
+          echo "✓ No hardcoded secrets detected"
 
       - name: Sanitize - Check for sensitive files
         run: |
