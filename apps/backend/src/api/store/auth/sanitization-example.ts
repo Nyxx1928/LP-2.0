@@ -21,14 +21,17 @@ const loginRateLimiter = new RateLimiter(5, 15 * 60 * 1000); // 5 attempts per 1
  */
 export async function registerExample(req: MedusaRequest, res: MedusaResponse) {
   try {
+    // Type assertion for request body
+    const body = req.body as Record<string, any>;
+
     // Extract and sanitize inputs
-    const email = sanitizeEmail(req.body.email);
-    const username = sanitizeUsername(req.body.username);
-    const firstName = sanitizeString(req.body.first_name);
-    const lastName = sanitizeString(req.body.last_name);
+    const email = sanitizeEmail(body.email);
+    const username = sanitizeUsername(body.username);
+    const firstName = sanitizeString(body.first_name);
+    const lastName = sanitizeString(body.last_name);
 
     // Validate password (don't sanitize passwords - validate length/complexity instead)
-    const password = req.body.password;
+    const password = body.password;
     if (typeof password !== 'string' || password.length < 8) {
       return res.status(400).json({
         error: 'Password must be at least 8 characters long',
@@ -54,6 +57,9 @@ export async function registerExample(req: MedusaRequest, res: MedusaResponse) {
  */
 export async function loginExample(req: MedusaRequest, res: MedusaResponse) {
   try {
+    // Type assertion for request body
+    const body = req.body as Record<string, any>;
+
     // Get client identifier for rate limiting (IP address)
     const clientId = req.ip || req.socket.remoteAddress || 'unknown';
 
@@ -65,8 +71,8 @@ export async function loginExample(req: MedusaRequest, res: MedusaResponse) {
     }
 
     // Sanitize email input
-    const email = sanitizeEmail(req.body.email);
-    const password = req.body.password;
+    const email = sanitizeEmail(body.email);
+    const password = body.password;
 
     if (typeof password !== 'string') {
       return res.status(400).json({
@@ -99,21 +105,24 @@ export async function loginExample(req: MedusaRequest, res: MedusaResponse) {
  */
 export async function updateProfileExample(req: MedusaRequest, res: MedusaResponse) {
   try {
+    // Type assertion for request body
+    const body = req.body as Record<string, any>;
+
     // Only allow specific fields to be updated
     const allowedFields = ['first_name', 'last_name', 'phone'];
     const updates: Record<string, string> = {};
 
-    if (req.body.first_name) {
-      updates.first_name = sanitizeString(req.body.first_name);
+    if (body.first_name) {
+      updates.first_name = sanitizeString(body.first_name);
     }
 
-    if (req.body.last_name) {
-      updates.last_name = sanitizeString(req.body.last_name);
+    if (body.last_name) {
+      updates.last_name = sanitizeString(body.last_name);
     }
 
-    if (req.body.phone) {
+    if (body.phone) {
       // Phone sanitization would go here
-      updates.phone = sanitizeString(req.body.phone);
+      updates.phone = sanitizeString(body.phone);
     }
 
     // Ignore any other fields that might be in the request
