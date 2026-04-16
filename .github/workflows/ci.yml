@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   phase1_lint_validate:
-    name: Phase 1 - Lint and validate
+    name: Phase 1 - Lint, validate, and sanitize
     runs-on: ubuntu-latest
     env:
       TURBO_TELEMETRY_DISABLED: "1"
@@ -33,6 +33,75 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Sanitize - Check for secrets
+        run: |
+          echo "Checking for potential secrets in code..."
+          # Look for actual secret assignments, excluding documentation and test files
+          if grep -r -E "(PASSWORD|SECRET|API_KEY|TOKEN|CREDENTIAL)\s*=\s*['\"][a-zA-Z0-9+/=]{16,}" \
+            --include="*.ts" --include="*.js" --include="*.tsx" --include="*.jsx" \
+            --exclude-dir={node_modules,.git,.turbo,dist,build,__tests__} \
+            --exclude="*.test.ts" --exclude="*.test.js" --exclude="*.spec.ts" --exclude="*.spec.js" \
+            --exclude="*.md" --exclude="*example*" \
+            apps/ packages/ 2>/dev/null; then
+            echo "⚠️ Warning: Potential hardcoded secrets found"
+            exit 1
+          fi
+          echo "✓ No hardcoded secrets detected"
+
+      - name: Sanitize - Check for sensitive files
+        run: |
+          echo "Checking for sensitive files..."
+          SENSITIVE_FILES=".env .env.local .env.production id_rsa id_dsa .pem .key"
+          for file in $SENSITIVE_FILES; do
+            if find . -name "$file" -not -path "*/node_modules/*" -not -path "*/.git/*" | grep -q .; then
+              echo "⚠️ Warning: Found sensitive file: $file"
+              exit 1
+            fi
+          done
+          echo "✓ No sensitive files found"
+
+      - name: Sanitize - Validate package integrity
+        run: |
+          echo "Validating package.json files..."
+          find . -name "package.json" -not -path "*/node_modules/*" -exec node -e "try { JSON.parse(require('fs').readFileSync('{}', 'utf8')); } catch(e) { console.error('Invalid JSON in {}'); process.exit(1); }" \;
+          echo "✓ All package.json files are valid"
+
+      - name: Sanitize - Check for unsafe input handling
+        run: |
+          echo "Checking for unsafe input handling patterns..."
+          UNSAFE_PATTERNS=0
+          
+          # Check for direct SQL concatenation (SQL injection risk)
+          if grep -r -E "query\(.*\+.*\)" --include="*.ts" --include="*.js" --exclude-dir={node_modules,.git,.turbo,dist,build} apps/backend/src 2>/dev/null; then
+            echo "⚠️ Warning: Potential SQL injection - use parameterized queries"
+            UNSAFE_PATTERNS=$((UNSAFE_PATTERNS + 1))
+          fi
+          
+          # Check for eval usage
+          if grep -r -E "\beval\(" --include="*.ts" --include="*.js" --exclude-dir={node_modules,.git,.turbo,dist,build} apps/ 2>/dev/null; then
+            echo "⚠️ Warning: eval() usage detected - security risk"
+            UNSAFE_PATTERNS=$((UNSAFE_PATTERNS + 1))
+          fi
+          
+          # Check for innerHTML without sanitization
+          if grep -r -E "\.innerHTML\s*=" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" --exclude-dir={node_modules,.git,.turbo,dist,build} apps/storefront 2>/dev/null; then
+            echo "⚠️ Warning: innerHTML usage detected - XSS risk, use textContent or sanitize"
+            UNSAFE_PATTERNS=$((UNSAFE_PATTERNS + 1))
+          fi
+          
+          # Check for dangerouslySetInnerHTML without sanitization
+          if grep -r "dangerouslySetInnerHTML" --include="*.tsx" --include="*.jsx" --exclude-dir={node_modules,.git,.turbo,dist,build} apps/storefront 2>/dev/null | grep -v "DOMPurify\|sanitize"; then
+            echo "⚠️ Warning: dangerouslySetInnerHTML without sanitization - XSS risk"
+            UNSAFE_PATTERNS=$((UNSAFE_PATTERNS + 1))
+          fi
+          
+          if [ $UNSAFE_PATTERNS -gt 0 ]; then
+            echo "❌ Found $UNSAFE_PATTERNS unsafe input handling pattern(s)"
+            exit 1
+          fi
+          
+          echo "✓ No unsafe input handling patterns detected"
 
       - name: Lint
         run: pnpm lint

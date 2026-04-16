@@ -3,7 +3,7 @@
 ## 1. Document Control
 
 - Project Name: Likhang Pinas E-Commerce Platform
-- Version: 1.0 (MVP)
+- Version: 2.0 (MVP)
 - Date: April 2026
 - Prepared by: Nicolas Lumapak
 - Target Launch: 3rd Week of May 2026
