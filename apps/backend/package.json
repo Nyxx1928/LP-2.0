@@ -33,7 +33,8 @@
     "@medusajs/framework": "2.13.5",
     "@medusajs/icons": "2.13.5",
     "@medusajs/medusa": "2.13.5",
-    "@medusajs/ui": "4.1.5"
+    "@medusajs/ui": "4.1.5",
+    "redis": "^5.12.1"
   },
   "devDependencies": {
     "@medusajs/test-utils": "2.13.5",
