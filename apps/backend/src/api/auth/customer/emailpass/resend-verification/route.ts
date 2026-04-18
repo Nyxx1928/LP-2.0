@@ -74,6 +74,31 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { TokenService } from "../../../../../lib/token-service";
 import { RateLimiter } from "../../../../../lib/rate-limiter";
 
+type DbManager = {
+  create: (entity: string, data: Record<string, unknown>) => Promise<unknown>;
+  update: (
+    entity: string,
+    id: string,
+    data: Record<string, unknown>
+  ) => Promise<unknown>;
+  delete: (entity: string, id: string) => Promise<unknown>;
+};
+
+interface RequestWithAuthContext extends MedusaRequest {
+  auth_context?: {
+    actor_id?: string;
+    actor_type?: string;
+  };
+}
+
+interface CustomerRow {
+  id: string;
+  email: string | null;
+  email_verified?: boolean | null;
+  first_name?: string | null;
+  last_name?: string | null;
+}
+
 /**
  * Rate limiter for email verification resend
  * 
@@ -117,6 +142,7 @@ export async function POST(
   res: MedusaResponse
 ): Promise<void> {
   const logger = req.scope.resolve("logger");
+  const request = req as RequestWithAuthContext;
 
   try {
     // ============================================================================
@@ -142,8 +168,8 @@ export async function POST(
      * 4. We check auth_context to see if user is logged in
      */
 
-    const customerId = req.auth_context?.actor_id;
-    const actorType = req.auth_context?.actor_type;
+    const customerId = request.auth_context?.actor_id;
+    const actorType = request.auth_context?.actor_type;
 
     if (!customerId || actorType !== "customer") {
       /**
@@ -187,7 +213,7 @@ export async function POST(
       filters: { id: customerId },
     });
 
-    const customer = customers.data?.[0];
+    const customer = customers.data?.[0] as CustomerRow | undefined;
 
     if (!customer) {
       /**
@@ -239,6 +265,17 @@ export async function POST(
 
       res.status(200).json({
         message: "Verification email sent",
+      });
+      return;
+    }
+
+    if (!customer.email) {
+      res.status(400).json({
+        error: {
+          type: "validation_error",
+          code: "MISSING_EMAIL",
+          message: "Customer email is missing. Please update your account email.",
+        },
       });
       return;
     }
@@ -327,7 +364,7 @@ export async function POST(
      */
 
     // Create database adapter for TokenService
-    const manager = req.scope.resolve("manager");
+    const manager = req.scope.resolve("manager") as DbManager;
 
     const tokenDb = {
       /**
@@ -460,7 +497,9 @@ export async function POST(
      * - Token generation failure
      * - Email service failure (Phase 3)
      */
-    logger.error("Error in resend verification:", error);
+    const normalizedError =
+      error instanceof Error ? error : new Error(String(error));
+    logger.error("Error in resend verification:", normalizedError);
 
     res.status(500).json({
       error: {
