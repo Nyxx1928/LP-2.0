@@ -68,6 +68,16 @@ import { TokenService } from "../../../../../lib/token-service";
 import { passwordResetRateLimiter } from "../../../../../lib/rate-limiter";
 import { createAuditLogger } from "../../../../../lib/audit-logger";
 
+type DbManager = {
+  create: (entity: string, data: Record<string, unknown>) => Promise<unknown>;
+  update: (
+    entity: string,
+    id: string,
+    data: Record<string, unknown>
+  ) => Promise<unknown>;
+  delete: (entity: string, id: string) => Promise<unknown>;
+};
+
 /**
  * Request body validation
  * 
@@ -238,7 +248,7 @@ export async function POST(
       filters: { email: normalizedEmail },
     });
     
-    const customer = customers[0] || null;
+    const customer = customers.data?.[0] || null;
     
     // ============================================================================
     // STEP 4: GENERATE TOKEN (if customer exists)
@@ -264,7 +274,7 @@ export async function POST(
       // Create database adapter for TokenService
       const tokenDb = {
         async createToken(tokenData: any) {
-          const manager = req.scope.resolve("manager");
+          const manager = req.scope.resolve("manager") as DbManager;
           const id = `token_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
           
           await manager.create("auth_token", {
@@ -364,7 +374,7 @@ export async function POST(
      */
     
     try {
-      const manager = req.scope.resolve("manager");
+      const manager = req.scope.resolve("manager") as DbManager;
       const auditLogger = createAuditLogger(manager);
 
       await auditLogger.logPasswordResetRequest({
@@ -419,7 +429,9 @@ export async function POST(
      * - Don't help attackers understand our system
      * - Provide enough info for user to contact support
      */
-    logger.error("Error in password reset request:", error);
+    const normalizedError =
+      error instanceof Error ? error : new Error(String(error));
+    logger.error("Error in password reset request:", normalizedError);
     
     res.status(500).json({
       error: {
