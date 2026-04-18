@@ -97,6 +97,16 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { SessionManager } from "../../../../../lib/session-manager";
 import { createAuditLogger } from "../../../../../lib/audit-logger";
 
+type DbManager = {
+  create: (entity: string, data: Record<string, unknown>) => Promise<unknown>;
+  update: (
+    entity: string,
+    id: string,
+    data: Record<string, unknown>
+  ) => Promise<unknown>;
+  delete: (entity: string, id: string) => Promise<unknown>;
+};
+
 /**
  * Cookie configuration
  * 
@@ -190,22 +200,22 @@ export async function POST(
             fields: ["*"],
             filters: { id },
           });
-          return sessions[0] || null;
+          return sessions.data?.[0] || null;
         },
         
         // Delete a session
         async deleteSession(id: string) {
-          await query.graph({
+          const sessions = await query.graph({
             entity: "session",
             fields: ["id"],
             filters: { id },
-          }).then(async (sessions) => {
-            if (sessions.length > 0) {
-              // In Medusa v2, we use the entity manager to delete
-              const manager = req.scope.resolve("manager");
-              await manager.delete("session", id);
-            }
           });
+
+          if (sessions.data && sessions.data.length > 0) {
+            // In Medusa v2, we use the entity manager to delete
+            const manager = req.scope.resolve("manager") as DbManager;
+            await manager.delete("session", id);
+          }
         },
         
         // Other methods required by SessionDatabase interface
@@ -242,7 +252,7 @@ export async function POST(
         logger.info(`Session invalidated for customer ${session.customerId}`);
         
         // Log audit event for logout
-        const manager = req.scope.resolve("manager");
+        const manager = req.scope.resolve("manager") as DbManager;
         const auditLogger = createAuditLogger(manager);
         await auditLogger.logLogout({
           customerId: session.customerId,
@@ -327,7 +337,9 @@ export async function POST(
     // The user is effectively logged out (no cookies = no authentication).
     // The database cleanup can be handled by a background job if needed.
     const logger = req.scope.resolve("logger");
-    logger.error("Error during logout:", error);
+    const normalizedError =
+      error instanceof Error ? error : new Error(String(error));
+    logger.error("Error during logout:", normalizedError);
 
     // Still clear cookies and return success
     res.cookie(COOKIE_CONFIG.sessionCookieName, "", {
