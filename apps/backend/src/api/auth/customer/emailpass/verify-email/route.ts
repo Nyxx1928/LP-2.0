@@ -73,6 +73,16 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { TokenService } from "../../../../../lib/token-service";
 import { createAuditLogger } from "../../../../../lib/audit-logger";
 
+type DbManager = {
+  create: (entity: string, data: Record<string, unknown>) => Promise<unknown>;
+  update: (
+    entity: string,
+    id: string,
+    data: Record<string, unknown>
+  ) => Promise<unknown>;
+  delete: (entity: string, id: string) => Promise<unknown>;
+};
+
 /**
  * Request body validation
  * 
@@ -224,7 +234,7 @@ export async function POST(
        * This prevents the same token from being used twice.
        */
       async markTokenAsUsed(id: string) {
-        const manager = req.scope.resolve("manager");
+        const manager = req.scope.resolve("manager") as DbManager;
         await manager.update("auth_token", id, {
           used: true,
         });
@@ -319,7 +329,9 @@ export async function POST(
       filters: { id: validToken.customerId },
     });
 
-    const customer = customers[0];
+    const customer = customers.data?.[0] as
+      | { id: string; email: string | null; email_verified?: boolean | null }
+      | undefined;
 
     if (!customer) {
       /**
@@ -370,7 +382,7 @@ export async function POST(
     }
 
     // Update customer record to mark email as verified
-    const manager = req.scope.resolve("manager");
+    const manager = req.scope.resolve("manager") as DbManager;
 
     await manager.update("customer", customer.id, {
       email_verified: true,
@@ -418,7 +430,7 @@ export async function POST(
     const auditLogger = createAuditLogger(manager);
     await auditLogger.logEmailVerification({
       customerId: customer.id,
-      email: customer.email,
+      email: customer.email ?? validToken.email,
       ipAddress: req.ip || req.socket.remoteAddress || "unknown",
       userAgent: req.headers["user-agent"],
     });
@@ -455,7 +467,9 @@ export async function POST(
      * - Don't help attackers understand our system
      * - Provide enough info for user to contact support
      */
-    logger.error("Error in email verification:", error);
+    const normalizedError =
+      error instanceof Error ? error : new Error(String(error));
+    logger.error("Error in email verification:", normalizedError);
 
     res.status(500).json({
       error: {
