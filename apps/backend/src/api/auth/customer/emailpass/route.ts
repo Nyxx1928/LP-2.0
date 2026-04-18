@@ -72,6 +72,26 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { MedusaError } from "@medusajs/framework/utils";
 import { createAuditLogger } from "../../../../lib/audit-logger";
 
+type DbManager = {
+  create: (entity: string, data: Record<string, unknown>) => Promise<unknown>;
+  update: (
+    entity: string,
+    id: string,
+    data: Record<string, unknown>
+  ) => Promise<unknown>;
+  delete: (entity: string, id: string) => Promise<unknown>;
+};
+
+interface CustomerAuthRow {
+  id: string;
+  email: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  failed_login_count?: number | null;
+  locked_until?: string | Date | null;
+  email_verified?: boolean | null;
+}
+
 /**
  * Account Lockout Configuration
  * 
@@ -184,7 +204,7 @@ export async function POST(
       );
     }
 
-    const customer = customers.data[0];
+    const customer = customers.data[0] as CustomerAuthRow;
 
     // Step 3: Check if account is locked
     // 
@@ -205,20 +225,23 @@ export async function POST(
           `Login attempt on locked account: ${email}, ${minutesRemaining} minutes remaining`
         );
 
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          `Account is locked due to too many failed login attempts. Please try again in ${minutesRemaining} minute(s).`,
-          {
+        res.status(403).json({
+          error: {
+            type: "not_allowed",
             code: "ACCOUNT_LOCKED",
+            message:
+              `Account is locked due to too many failed login attempts. ` +
+              `Please try again in ${minutesRemaining} minute(s).`,
             lockoutMinutesRemaining: minutesRemaining,
-          }
-        );
+          },
+        });
+        return;
       } else {
         // Lockout has expired - automatically unlock the account
         // 
         // We clear the lockout fields so the user can try again.
         // This is "automatic unlock" - no admin intervention needed.
-        const manager = req.scope.resolve("manager");
+        const manager = req.scope.resolve("manager") as DbManager;
         await manager.update("customer", customer.id, {
           locked_until: null,
           failed_login_count: 0,
@@ -236,9 +259,13 @@ export async function POST(
     
     let authResult;
     try {
-      authResult = await authModuleService.authenticate("customer", "emailpass", {
+      authResult = await authModuleService.authenticate("emailpass", {
         body: { email, password },
       });
+
+      if (!authResult?.success) {
+        throw new Error(authResult?.error || "Authentication failed");
+      }
     } catch (error) {
       // Authentication failed - wrong password
       // 
@@ -248,7 +275,7 @@ export async function POST(
       // 3. If yes, lock the account
       // 4. Log the failed attempt
       
-      const manager = req.scope.resolve("manager");
+      const manager = req.scope.resolve("manager") as DbManager;
       const newFailedCount = (customer.failed_login_count || 0) + 1;
 
       if (newFailedCount >= LOCKOUT_CONFIG.maxFailedAttempts) {
@@ -271,21 +298,23 @@ export async function POST(
         const auditLogger = createAuditLogger(manager);
         await auditLogger.logAccountLocked({
           customerId: customer.id,
-          email: customer.email,
+          email: customer.email ?? email,
           ipAddress: req.ip || req.socket.remoteAddress || "unknown",
           userAgent: req.headers["user-agent"],
           lockoutMinutes: 30,
           failedAttempts: newFailedCount,
         });
 
-        throw new MedusaError(
-          MedusaError.Types.NOT_ALLOWED,
-          `Account locked due to too many failed login attempts. Please try again in 30 minutes.`,
-          {
+        res.status(403).json({
+          error: {
+            type: "not_allowed",
             code: "ACCOUNT_LOCKED",
+            message:
+              "Account locked due to too many failed login attempts. Please try again in 30 minutes.",
             lockoutMinutesRemaining: 30,
-          }
-        );
+          },
+        });
+        return;
       } else {
         // Not locked yet - just increment the counter
         await manager.update("customer", customer.id, {
@@ -301,21 +330,24 @@ export async function POST(
         // Log audit event for failed login
         const auditLogger = createAuditLogger(manager);
         await auditLogger.logLoginFailure({
-          email: customer.email,
+          email: customer.email ?? email,
           ipAddress: req.ip || req.socket.remoteAddress || "unknown",
           userAgent: req.headers["user-agent"],
           reason: "wrong_password",
           attemptsRemaining,
         });
 
-        throw new MedusaError(
-          MedusaError.Types.UNAUTHORIZED,
-          `Invalid email or password. ${attemptsRemaining} attempt(s) remaining before account lockout.`,
-          {
+        res.status(401).json({
+          error: {
+            type: "unauthorized",
             code: "INVALID_CREDENTIALS",
+            message:
+              `Invalid email or password. ${attemptsRemaining} attempt(s) ` +
+              "remaining before account lockout.",
             attemptsRemaining,
-          }
-        );
+          },
+        });
+        return;
       }
     }
 
@@ -328,7 +360,7 @@ export async function POST(
     // 4. Create a session (handled by Medusa)
     // 5. Log the successful login
     
-    const manager = req.scope.resolve("manager");
+    const manager = req.scope.resolve("manager") as DbManager;
     await manager.update("customer", customer.id, {
       failed_login_count: 0,
       locked_until: null,
@@ -341,7 +373,7 @@ export async function POST(
     const auditLogger = createAuditLogger(manager);
     await auditLogger.logLoginSuccess({
       customerId: customer.id,
-      email: customer.email,
+      email: customer.email ?? email,
       ipAddress: req.ip || req.socket.remoteAddress || "unknown",
       userAgent: req.headers["user-agent"],
     });
@@ -354,7 +386,7 @@ export async function POST(
       customer: {
         id: customer.id,
         email: customer.email,
-        email_verified: customer.email_verified,
+        email_verified: !!customer.email_verified,
         first_name: customer.first_name,
         last_name: customer.last_name,
       },
@@ -372,7 +404,9 @@ export async function POST(
     }
 
     // Unexpected error - log it and return generic error
-    logger.error("Unexpected error during login:", error);
+    const normalizedError =
+      error instanceof Error ? error : new Error(String(error));
+    logger.error("Unexpected error during login:", normalizedError);
     
     throw new MedusaError(
       MedusaError.Types.UNEXPECTED_STATE,
