@@ -78,6 +78,16 @@ import { SessionManager } from "../../../../../../lib/session-manager";
 import { createAuditLogger } from "../../../../../../lib/audit-logger";
 import bcrypt from "bcrypt";
 
+type DbManager = {
+  create: (entity: string, data: Record<string, unknown>) => Promise<unknown>;
+  update: (
+    entity: string,
+    id: string,
+    data: Record<string, unknown>
+  ) => Promise<unknown>;
+  delete: (entity: string, id: string) => Promise<unknown>;
+};
+
 /**
  * Request body validation
  * 
@@ -213,7 +223,7 @@ export async function POST(
       },
 
       async markTokenAsUsed(id: string) {
-        const manager = req.scope.resolve("manager");
+        const manager = req.scope.resolve("manager") as DbManager;
         await manager.update("auth_token", id, {
           used: true,
         });
@@ -325,7 +335,9 @@ export async function POST(
       filters: { email: validToken.email },
     });
 
-    const customer = customers[0];
+    const customer = customers.data?.[0] as
+      | { id: string; email: string | null }
+      | undefined;
 
     if (!customer) {
       /**
@@ -372,7 +384,7 @@ export async function POST(
      * - Takes ~250ms to hash (acceptable for password reset)
      */
 
-    const manager = req.scope.resolve("manager");
+    const manager = req.scope.resolve("manager") as DbManager;
 
     const passwordHash = await bcrypt.hash(password, 12);
 
@@ -444,13 +456,14 @@ export async function POST(
           fields: ["id"],
           filters: { customer_id: customerId },
         });
+        const rows = sessions.data ?? [];
 
         // Delete all sessions
-        for (const session of sessions) {
+        for (const session of rows) {
           await manager.delete("session", session.id);
         }
 
-        return sessions.length;
+        return rows.length;
       },
 
       async listActiveSessions() {
@@ -500,7 +513,7 @@ export async function POST(
     const auditLogger = createAuditLogger(manager);
     await auditLogger.logPasswordResetComplete({
       customerId: customer.id,
-      email: customer.email,
+      email: customer.email ?? validToken.email,
       ipAddress: req.ip || req.socket.remoteAddress || "unknown",
       userAgent: req.headers["user-agent"],
     });
@@ -531,7 +544,9 @@ export async function POST(
      * 2. Return a generic error message (don't expose internals)
      * 3. Return 500 Internal Server Error
      */
-    logger.error("Error in password reset confirmation:", error);
+    const normalizedError =
+      error instanceof Error ? error : new Error(String(error));
+    logger.error("Error in password reset confirmation:", normalizedError);
 
     res.status(500).json({
       error: {
