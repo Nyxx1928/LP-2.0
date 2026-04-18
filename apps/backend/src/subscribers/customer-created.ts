@@ -91,7 +91,12 @@ export default async function handleCustomerCreated({
     // - Services are registered in the container
     // - We "resolve" them when needed
     // - This makes testing easier (can inject mocks)
-    const query = container.resolve("query");
+    const manager = container.resolve("manager") as {
+      create: (
+        entity: string,
+        data: Record<string, unknown>
+      ) => Promise<unknown>;
+    };
 
     // === STEP 2: Create TokenService instance ===
     // 
@@ -100,11 +105,45 @@ export default async function handleCustomerCreated({
     // 
     // In a production app, we might register this as a Medusa service,
     // but for now we create it on-demand.
-    const { TokenService } = await import("../lib/token-service");
-    const { createTokenDatabase } = await import("../lib/token-database");
+    const { TokenService } = await import("../lib/token-service.js");
 
     // Create database adapter for TokenService
-    const tokenDb = createTokenDatabase(query);
+    const tokenDb = {
+      async createToken(tokenData: any) {
+        const id = `token_${Date.now()}_${Math.random()
+          .toString(36)
+          .substr(2, 9)}`;
+
+        await manager.create("auth_token", {
+          id,
+          type: tokenData.type,
+          customer_id: tokenData.customerId,
+          email: tokenData.email,
+          token_hash: tokenData.tokenHash,
+          used: tokenData.used,
+          expires_at: tokenData.expiresAt,
+          created_at: new Date(),
+        });
+
+        return {
+          id,
+          ...tokenData,
+          createdAt: new Date(),
+        };
+      },
+      async findTokenByHash() {
+        return null;
+      },
+      async markTokenAsUsed() {
+        return;
+      },
+      async deleteExpiredTokens() {
+        return 0;
+      },
+      async countRecentTokens() {
+        return 0;
+      },
+    };
 
     // Create TokenService with default config
     const tokenService = new TokenService(tokenDb);
