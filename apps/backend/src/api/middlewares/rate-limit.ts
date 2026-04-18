@@ -205,7 +205,8 @@ export function createRateLimitMiddleware(
  */
 export function getEmailIdentifier(req: MedusaRequest): string {
   // Extract email from request body
-  const email = req.body?.email;
+  const body = req.body as { email?: unknown } | undefined;
+  const email = body?.email;
   
   if (!email || typeof email !== 'string') {
     // If no email, fall back to IP address
