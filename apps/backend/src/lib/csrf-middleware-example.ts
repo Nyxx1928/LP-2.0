@@ -24,7 +24,7 @@
  * - Webhook endpoints (use signature verification instead)
  */
 
-import { MedusaRequest, MedusaResponse } from '@medusajs/medusa';
+import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { csrfProtection } from './csrf-protection';
 
 /**
@@ -172,13 +172,14 @@ export async function validateCSRF(
        * - Prevents information leakage
        * - Attacker can't learn from error messages
        */
-      return res.status(403).json({
+      res.status(403).json({
         error: {
           type: 'csrf_error',
           code: 'INVALID_CSRF_TOKEN',
           message: 'Invalid or missing CSRF token',
         },
       });
+      return;
     }
     
     // Token is valid, continue to route handler
@@ -218,7 +219,10 @@ export async function loginWithCSRF(
   // CSRF validation happens in middleware (before this function)
   // If we reach here, CSRF token is valid
   
-  const { email, password } = req.body;
+  const { email, password } = req.body as {
+    email?: string;
+    password?: string;
+  };
   
   // ... login logic ...
   
@@ -234,7 +238,12 @@ export async function registerWithCSRF(
 ): Promise<void> {
   // CSRF validation happens in middleware
   
-  const { email, password, first_name, last_name } = req.body;
+  const { email, password, first_name, last_name } = req.body as {
+    email?: string;
+    password?: string;
+    first_name?: string;
+    last_name?: string;
+  };
   
   // ... registration logic ...
   
