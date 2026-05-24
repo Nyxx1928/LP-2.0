@@ -7,11 +7,12 @@ description: Always generate a step-by-step lesson in a dedicated lessons folder
 
 - Store lessons in a dedicated folder at `.kiro/Skills/teach-as-you-code/lessons/`.
 - For each new task, create a new lesson file in that folder instead of overwriting an old file.
-- Name lesson files with this scalable pattern: `YYYY-MM-DD-short-topic-slug.md`.
+- For each new task, create a new lesson file in that folder instead of overwriting an old file.
+- Name lesson files with this scalable pattern: `NN-short-topic-slug.md` (zero-padded numeric prefix, e.g. `01-add-rate-limiter.md`).
 - Make the `short-topic-slug` intuitive from the actual task (for example: `add-rate-limiter`, `fix-login-lockout`, `build-product-grid`).
-- If a filename already exists for the same date and topic, append a numeric suffix: `-2`, `-3`, and so on.
-- Maintain `.kiro/Skills/teach-as-you-code/lessons/INDEX.md` and add one entry per lesson with date, title, and file path.
-- Use this index row format: `| YYYY-MM-DD | Lesson Title | lessons-file-name.md |`.
+- If a filename already exists for the same number and topic, append a numeric suffix: `-2`, `-3`, and so on.
+- Maintain `.kiro/Skills/teach-as-you-code/lessons/INDEX.md` and add one entry per lesson with number, title, and file path.
+- Use this index row format: `| Number | Lesson Title | lessons-file-name.md |`.
 - Put teaching content in the lesson file, including every major step in plain language before and after implementation.
 - Break down in the lesson file: what the code does, why this approach, alternatives considered, key concepts, and potential pitfalls.
 - Structure every lesson file with these headings in order:

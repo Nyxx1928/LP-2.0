@@ -4,5 +4,5 @@ Use this index to track generated lesson files.
 
 Template: `TEMPLATE.md`
 
-| Date | Lesson Title | File |
-| ---- | ------------ | ---- |
+| Number | Lesson Title | File |
+| ------ | ------------ | ---- |
